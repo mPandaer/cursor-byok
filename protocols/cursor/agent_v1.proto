@@ -99,7 +99,7 @@ message AgentConversationTurn {
   optional string request_id = 3;
 }
 
-// Copied from: local:agent.v1.AgentConversationTurnStructure (var: gfn)
+// Cursor 3.29.9: local:agent.v1.AgentConversationTurnStructure
 message AgentConversationTurnStructure {
   bytes user_message = 1;
   repeated bytes steps = 2;
@@ -107,6 +107,38 @@ message AgentConversationTurnStructure {
   optional string encrypted_model = 4;
   optional uint32 dynamic_tool_count = 5;
   repeated uint32 send_message_step_indices = 6;
+  optional string routed_model_display_name = 7;
+  repeated SubagentDispatchStep subagent_dispatch_steps = 8;
+  repeated string dynamic_tool_names = 9;
+  optional string user_message_id = 10;
+  optional LongReasoningReminderState long_reasoning_reminder = 11;
+  bool long_reasoning_reminder_exposure_logged = 12;
+  repeated uint32 assistant_text_step_indices = 13;
+  optional bool assistant_text_steps_recorded = 14;
+  repeated uint32 app_secrets_request_step_indices = 15;
+  repeated uint32 preference_change_step_indices = 16;
+}
+
+// Cursor 3.29.9: local:agent.v1.LongReasoningReminderState
+message LongReasoningReminderState {
+  uint32 remaining_delay_calls = 1;
+}
+
+// Cursor 3.29.9: local:agent.v1.SubagentDispatchStep
+message SubagentDispatchStep {
+  uint32 step_index = 1;
+  string tool_call_id = 2;
+  SubagentDispatchTool tool = 3;
+  bool backgrounded = 4;
+}
+
+// Cursor 3.29.9: local:agent.v1.SubagentDispatchTool
+enum SubagentDispatchTool {
+  SUBAGENT_DISPATCH_TOOL_UNSPECIFIED = 0;
+  SUBAGENT_DISPATCH_TOOL_TASK = 1;
+  SUBAGENT_DISPATCH_TOOL_CREATE_AGENT = 2;
+  SUBAGENT_DISPATCH_TOOL_SEND_TO_AGENT = 3;
+  SUBAGENT_DISPATCH_TOOL_CREATE_PROJECT = 4;
 }
 
 // Copied from: local:agent.v1.AgentHostBackgroundWork (var: aRd)
@@ -303,12 +335,12 @@ enum AgentMode {
   AGENT_MODE_PLAN = 3;
   AGENT_MODE_DEBUG = 4;
   AGENT_MODE_TRIAGE = 5;
-  AGENT_MODE_PROJECT = 6;
   AGENT_MODE_MULTITASK = 7;
   AGENT_MODE_CUSTOM = 8;
 }
 
 // Copied from: local:agent.v1.AgentRunRequest (var: Tvs)
+// Cursor 3.29.9: local:agent.v1.AgentRunRequest
 message AgentRunRequest {
   ConversationStateStructure conversation_state = 1;
   ConversationAction action = 2;
@@ -319,7 +351,6 @@ message AgentRunRequest {
   optional McpFileSystemOptions mcp_file_system_options = 6;
   optional SkillOptions skill_options = 7;
   optional string custom_system_prompt = 8;
-  optional bool suggest_next_prompt = 10;
   optional string subagent_type_name = 11;
   optional bool exclude_workspace_context = 12;
   optional string harness = 13;
@@ -336,10 +367,40 @@ message AgentRunRequest {
   optional string computer_use_coordinate_mode = 24;
   optional string run_id = 25;
   optional string agent_session_id = 26;
-  optional bool client_supports_prompt_context_usage_rpc = 27;
+  optional bool client_supports_routed_model_update = 28;
+  optional SystemPromptSpec system_prompt_spec = 29;
+  optional ClientLlmGatewayCredential client_llm_gateway_credential = 30;
+  optional bool client_supports_preview_card = 31;
+  optional bool started_as_new_project = 32;
+  optional bool first_project_onboarding = 33;
+  optional uint32 next_interaction_query_id = 34;
+  optional VoiceCallNotes voice_call_notes = 35;
+  optional string transcript_parent_conversation_id = 36;
+  optional bool emit_model_call_usage = 37;
 }
 
+// Cursor 3.29.9: local:agent.v1.SystemPromptSpec
+message SystemPromptSpec {
+  oneof spec {
+    string replace = 1;
+    string append = 2;
+  }
+}
+
+// Cursor 3.29.9: local:agent.v1.ClientLlmGatewayCredential
+message ClientLlmGatewayCredential {
+  string bearer_token = 1;
+}
+
+// Cursor 3.29.9: local:agent.v1.VoiceCallNotes
+message VoiceCallNotes {
+  string request = 1;
+  string message_id = 2;
+}
+
+
 // Copied from: local:agent.v1.AgentServerMessage (var: qW)
+// Cursor 3.29.9: local:agent.v1.AgentServerMessage
 message AgentServerMessage {
   TtftBreakdown ttft_breakdown = 8;
   oneof message {
@@ -1622,6 +1683,7 @@ message ConversationState {
 }
 
 // Copied from: local:agent.v1.ConversationStateStructure (var: Lf)
+// Cursor 3.29.9: local:agent.v1.ConversationStateStructure
 message ConversationStateStructure {
   repeated bytes root_prompt_messages_json = 1;
   repeated bytes turns = 8;
@@ -1655,6 +1717,48 @@ message ConversationStateStructure {
   map<string, bytes> subagent_state_refs = 31;
   optional GoalState goal_state = 32;
   optional bool is_root_project_conversation = 33;
+  repeated string completed_ask_question_tool_call_ids = 34;
+  repeated string durable_skill_blocks = 35;
+  optional string durable_custom_mode_id = 36;
+  optional uint32 message_count_at_last_compaction = 37;
+  repeated string recent_user_message_ids = 38;
+  optional uint32 recent_user_message_ids_older_turn_count = 39;
+  optional TurnTelemetryState turn_telemetry = 40;
+  repeated string mentioned_agent_ids = 42;
+  repeated VoiceCallUtterance voice_call_utterances = 43;
+  optional VoiceCallPendingAnswer voice_call_pending_answer = 44;
+  repeated string voice_call_time_task_ids = 45;
+  bool writes_voice_call_utterances = 46;
+  optional bool voice_calls_read_utterances = 47;
+  optional string user_time_zone = 49;
+  optional string project_coordinator_system_section = 50;
+}
+
+// Cursor 3.29.9: local:agent.v1.TurnTelemetryState
+message TurnTelemetryState {
+  uint32 completed_turn_count_capped = 1;
+  optional uint64 last_completed_turn_timestamp_ms = 2;
+}
+
+// Cursor 3.29.9: local:agent.v1.VoiceCallUtterance
+message VoiceCallUtterance {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_SEND = 1;
+    KIND_TERMINAL = 2;
+  }
+
+  string id = 1;
+  Kind kind = 2;
+  string text = 3;
+  repeated string answers_message_ids = 4;
+}
+
+// Cursor 3.29.9: local:agent.v1.VoiceCallPendingAnswer
+message VoiceCallPendingAnswer {
+  repeated string message_ids = 1;
+  bool reads_utterances = 2;
+  bool ended_on_send = 3;
 }
 
 // Copied from: local:agent.v1.ConversationStep (var: MG)
@@ -4927,7 +5031,7 @@ message PreCompactRequestResponse {
   optional string user_message = 1;
 }
 
-// Copied from: local:agent.v1.PreFetchedBlob (var: xvs)
+// Cursor 3.29.9: local:agent.v1.PreFetchedBlob
 message PreFetchedBlob {
   bytes id = 1;
   bytes value = 2;
@@ -5022,7 +5126,6 @@ message PrewarmRequest {
   optional string best_of_n_group_id = 6;
   optional bool try_use_best_of_n_promotion = 7;
   optional string custom_system_prompt = 8;
-  optional bool suggest_next_prompt = 10;
   optional string subagent_type_name = 11;
   optional bool exclude_workspace_context = 12;
   optional string harness = 13;
@@ -5037,7 +5140,11 @@ message PrewarmRequest {
   optional bool client_supports_send_to_user = 22;
   optional string computer_use_coordinate_mode = 23;
   optional string agent_session_id = 24;
-  optional bool client_supports_prompt_context_usage_rpc = 25;
+  optional bool client_supports_routed_model_update = 26;
+  optional ClientLlmGatewayCredential client_llm_gateway_credential = 27;
+  optional bool client_supports_preview_card = 28;
+  optional bool started_as_new_project = 29;
+  optional bool first_project_onboarding = 30;
 }
 
 // Copied from: local:agent.v1.PrivateWorkerStatus (var: zCf)
@@ -8110,12 +8217,16 @@ message TruncatedToolCallSuccess {
 }
 
 // Copied from: local:agent.v1.TtftBreakdown (var: BAl)
+// Cursor 3.29.9: local:agent.v1.TtftBreakdown
 message TtftBreakdown {
   double server_first_token_ms = 1;
   double pre_stream_setup_ms = 2;
   double wait_for_first_event_ms = 3;
   optional double provider_ttft_ms = 4;
   double slow_pool_wait_ms = 5;
+  optional double client_prep_ms = 6;
+  bool client_clock = 7;
+  optional double pre_handler_ms = 8;
 }
 
 // Copied from: local:agent.v1.TurnEndedUpdate (var: $wi)

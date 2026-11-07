@@ -378,7 +378,13 @@ fn every_captured_mode_owns_and_renders_its_runtime_template() {
     ] {
         let rendered = compiler.runtime_message(mode, &values).unwrap();
         assert!(rendered.contains(marker), "missing {mode:?} marker");
-        assert!(rendered.contains("<user_query>\nquestion\n</user_query>"));
+        let lines = rendered.lines().collect::<Vec<_>>();
+        let query_start = lines
+            .iter()
+            .position(|line| *line == "<user_query>")
+            .expect("runtime template should contain user query block");
+        assert_eq!(lines.get(query_start + 1), Some(&"question"));
+        assert_eq!(lines.get(query_start + 2), Some(&"</user_query>"));
         assert_eq!(rendered.matches("<user_query>").count(), 1);
     }
 }

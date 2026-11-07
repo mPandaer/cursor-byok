@@ -160,18 +160,21 @@ pub fn decode(request: &ai::BidiAppendRequest) -> Result<DecodedAppend> {
         .map(|id| id.request_id.as_str())
         .filter(|id| !id.is_empty())
         .ok_or_else(|| Error::Protocol("BidiAppend request_id is required".into()))?;
-    if !request.data_binary.is_empty() {
-        return Err(Error::Protocol(
-            "BidiAppend data_binary is not part of the captured protocol".into(),
-        ));
-    }
-    if request.data.is_empty() {
-        return Err(Error::Protocol(
-            "BidiAppend contains no AgentClientMessage".into(),
-        ));
-    }
-    let payload = hex::decode(&request.data)
-        .map_err(|error| Error::Protocol(format!("invalid BidiAppend hex: {error}")))?;
+    let payload = match (request.data.is_empty(), request.data_binary.is_empty()) {
+        (false, false) => {
+            return Err(Error::Protocol(
+                "BidiAppend data and data_binary cannot both be set".into(),
+            ));
+        }
+        (false, true) => hex::decode(&request.data)
+            .map_err(|error| Error::Protocol(format!("invalid BidiAppend hex: {error}")))?,
+        (true, false) => request.data_binary.clone(),
+        (true, true) => {
+            return Err(Error::Protocol(
+                "BidiAppend contains no AgentClientMessage".into(),
+            ));
+        }
+    };
     Ok(DecodedAppend {
         request_id: request_id.into(),
         seqno: request.append_seqno,
@@ -208,4 +211,64 @@ pub async fn append(
         })
         .await?;
     Ok(ai::BidiAppendResponse {})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(data: String, data_binary: Vec<u8>) -> ai::BidiAppendRequest {
+        ai::BidiAppendRequest {
+            data,
+            request_id: Some(ai::BidiRequestId {
+                request_id: "request".into(),
+            }),
+            append_seqno: 7,
+            data_binary,
+        }
+    }
+
+    fn heartbeat_payload() -> Vec<u8> {
+        agent::AgentClientMessage {
+            message: Some(agent::agent_client_message::Message::ClientHeartbeat(
+                agent::ClientHeartbeat {},
+            )),
+        }
+        .encode_to_vec()
+    }
+
+    #[test]
+    fn decode_accepts_binary_agent_message() {
+        let decoded = decode(&request(String::new(), heartbeat_payload())).unwrap();
+
+        assert_eq!(decoded.request_id, "request");
+        assert_eq!(decoded.seqno, 7);
+        assert!(matches!(
+            decoded.message.message,
+            Some(agent::agent_client_message::Message::ClientHeartbeat(_))
+        ));
+    }
+
+    #[test]
+    fn decode_accepts_hex_agent_message() {
+        let decoded = decode(&request(hex::encode(heartbeat_payload()), Vec::new())).unwrap();
+
+        assert!(matches!(
+            decoded.message.message,
+            Some(agent::agent_client_message::Message::ClientHeartbeat(_))
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_both_agent_message_encodings() {
+        let payload = heartbeat_payload();
+        let error = match decode(&request(hex::encode(&payload), payload)) {
+            Ok(_) => panic!("expected conflicting Bidi payload formats to fail"),
+            Err(error) => error,
+        };
+
+        assert!(error
+            .to_string()
+            .contains("data and data_binary cannot both be set"));
+    }
 }
