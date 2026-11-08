@@ -133,6 +133,71 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      # Tauri downloads NSIS / linuxdeploy from GitHub release downloads at
+      # bundle time. Those URLs intermittently answer 504 while the release
+      # asset API is healthy, so prefetch the tools through the API into the
+      # bundler cache. NSIS content is hash-verified by the bundler itself.
+      - name: Warm bundler tools (Windows)
+        if: matrix.platform == 'windows-x86_64'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tools = Join-Path $env:LOCALAPPDATA 'tauri'
+          $nsis = Join-Path $tools 'NSIS'
+
+          function Save-Asset([string]$repo, [string]$tag, [string]$name, [string]$dest) {
+            $id = gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == `"$name`") | .id"
+            if ($LASTEXITCODE -ne 0 -or -not $id) { throw "missing release asset $repo@$tag/$name" }
+            New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+            curl.exe --fail --silent --show-error --location `
+              -H "Authorization: Bearer $env:GH_TOKEN" `
+              -H "Accept: application/octet-stream" `
+              "https://api.github.com/repos/$repo/releases/assets/$id" -o $dest
+            if ($LASTEXITCODE -ne 0) { throw "failed to download $repo@$tag/$name" }
+          }
+
+          $zip = Join-Path $env:TEMP 'nsis-3.11.zip'
+          Save-Asset 'tauri-apps/binary-releases' 'nsis-3.11' 'nsis-3.11.zip' $zip
+          $extracted = Join-Path $env:TEMP 'nsis-3.11'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extracted -Force
+          New-Item -ItemType Directory -Force $nsis | Out-Null
+          Copy-Item (Join-Path $extracted 'nsis-3.11\*') $nsis -Recurse -Force
+          Save-Asset 'tauri-apps/nsis-tauri-utils' 'nsis_tauri_utils-v0.5.3' 'nsis_tauri_utils.dll' `
+            (Join-Path $nsis 'Plugins\x86-unicode\additional\nsis_tauri_utils.dll')
+
+      - name: Warm bundler tools (Linux)
+        if: matrix.platform == 'linux-x86_64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tools="$HOME/.cache/tauri"
+          mkdir -p "$tools"
+
+          save_asset() {
+            local repo=$1 tag=$2 name=$3 dest=$4 id
+            id=$(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$name\") | .id")
+            test -n "$id"
+            curl --fail --silent --show-error --location \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/octet-stream" \
+              "https://api.github.com/repos/$repo/releases/assets/$id" -o "$dest"
+          }
+
+          save_asset tauri-apps/binary-releases apprun-old AppRun-x86_64 "$tools/AppRun-x86_64"
+          save_asset tauri-apps/binary-releases linuxdeploy linuxdeploy-x86_64.AppImage "$tools/linuxdeploy-x86_64.AppImage"
+          save_asset linuxdeploy/linuxdeploy-plugin-appimage continuous linuxdeploy-plugin-appimage-x86_64.AppImage "$tools/linuxdeploy-plugin-appimage-x86_64.AppImage"
+          chmod +x "$tools/AppRun-x86_64" "$tools/linuxdeploy-x86_64.AppImage" "$tools/linuxdeploy-plugin-appimage-x86_64.AppImage"
+
+          gh api repos/tauri-apps/linuxdeploy-plugin-gtk/contents/linuxdeploy-plugin-gtk.sh \
+            -H "Accept: application/vnd.github.raw" > "$tools/linuxdeploy-plugin-gtk.sh"
+          gh api repos/tauri-apps/linuxdeploy-plugin-gstreamer/contents/linuxdeploy-plugin-gstreamer.sh \
+            -H "Accept: application/vnd.github.raw" > "$tools/linuxdeploy-plugin-gstreamer.sh"
+          chmod +x "$tools/linuxdeploy-plugin-gtk.sh" "$tools/linuxdeploy-plugin-gstreamer.sh"
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
