@@ -60,6 +60,58 @@
 - `VoiceCallUtterance`
 - `VoiceCallPendingAnswer`
 
+## 服务端下发的 agent-harness 与 managed-local loop（2026-11-08 补充）
+
+Cursor 3.29.9 会把 agent harness 作为**动态模块**下发，独立于 IDE Bundle 更新。本机位置：
+
+```text
+%APPDATA%\Cursor\agent-harness\current                 # 当前 generation hash
+%APPDATA%\Cursor\agent-harness\versions\<hash>\agent-harness.cjs
+```
+
+gate `agent_host_local_loop` 打开时，agent-host 把 agent loop 搬到客户端运行
+（`managed-local`），并通过 **`aiserver.v1.InferenceService`** 与网关通信：
+
+```text
+BidiAppend(data_binary = RunInferenceClientMessage)   # seqno 0 起
+POST aiserver.v1.InferenceService/RunInferenceSSE      # BidiRequestId，返回 RunInferenceServerMessage 流
+
+RunInferenceClientMessage
+  1 run_request      RunInferenceRunRequest
+  2 invoke_model     RunInferenceInvokeModel
+  3 cancel_invocation
+  4 finish_run       RunInferenceFinishRun
+  5 client_heartbeat
+  6 agent_event
+  7 run_request_log
+  9 resolve_subagent_models
+  10 client_first_call_timings
+  11 delta_base_seed
+
+RunInferenceServerMessage
+  1 heartbeat   2 run_ready   3 invocation_response
+  4 invocation_end   5 subagent_models_resolved
+```
+
+实测中 `BidiAppend` 的 payload 是 `RunInferenceClientMessage`（field 1 为
+`conversation_id` 字符串，field 11 为 `RunInferenceAgentModule`），不是
+`AgentClientMessage`；服务端按 `AgentClientMessage` 解码会得到
+`AgentRunRequest.conversation_state: ... delimited length exceeded`。
+
+### 当前决定
+
+cursor-byok 实现的是**后端 loop**（`AgentService` + `AgentClientMessage`，agent
+loop 在服务端运行）。因此 Statsig bootstrap 中强制关闭
+`agent_host_local_loop`，让 Cursor 回到后端 loop；`RunInference*` 协议暂不实现。
+
+### 验证方式
+
+```text
+BidiAppend 解码失败时设置 CURSOR_BIDI_CAPTURE=<目录>
+  → <request_id>-<seqno>.bin / .json
+  → 用无 schema wire 扫描器确认 payload 的实际消息类型
+```
+
 ## 验证状态
 
 - 协议 Bundle 直接分析：完成。

@@ -160,26 +160,82 @@ pub fn decode(request: &ai::BidiAppendRequest) -> Result<DecodedAppend> {
         .map(|id| id.request_id.as_str())
         .filter(|id| !id.is_empty())
         .ok_or_else(|| Error::Protocol("BidiAppend request_id is required".into()))?;
-    let payload = match (request.data.is_empty(), request.data_binary.is_empty()) {
+    let (payload, source) = match (request.data.is_empty(), request.data_binary.is_empty()) {
         (false, false) => {
             return Err(Error::Protocol(
                 "BidiAppend data and data_binary cannot both be set".into(),
             ));
         }
-        (false, true) => hex::decode(&request.data)
-            .map_err(|error| Error::Protocol(format!("invalid BidiAppend hex: {error}")))?,
-        (true, false) => request.data_binary.clone(),
+        (false, true) => (
+            hex::decode(&request.data)
+                .map_err(|error| Error::Protocol(format!("invalid BidiAppend hex: {error}")))?,
+            "hex",
+        ),
+        (true, false) => (request.data_binary.clone(), "binary"),
         (true, true) => {
             return Err(Error::Protocol(
                 "BidiAppend contains no AgentClientMessage".into(),
             ));
         }
     };
+    let message = agent::AgentClientMessage::decode(payload.as_slice()).inspect_err(|error| {
+        record_failed_payload(request_id, request.append_seqno, source, &payload, error);
+    })?;
     Ok(DecodedAppend {
         request_id: request_id.into(),
         seqno: request.append_seqno,
-        message: agent::AgentClientMessage::decode(payload.as_slice())?,
+        message,
     })
+}
+
+/// Records the raw payload when an `AgentClientMessage` fails to decode.
+///
+/// A decode error alone cannot distinguish schema drift from a bad envelope,
+/// so the protocol boundary keeps the exact bytes for a schema-less wire scan.
+/// The payload may contain user content: dumping only runs when
+/// `CURSOR_BIDI_CAPTURE` points at a local directory, and captures stay outside
+/// the repository.
+fn record_failed_payload(
+    request_id: &str,
+    seqno: i64,
+    source: &str,
+    payload: &[u8],
+    error: &prost::DecodeError,
+) {
+    tracing::warn!(
+        request_id,
+        seqno,
+        source,
+        payload_len = payload.len(),
+        error = %error,
+        "failed to decode BidiAppend AgentClientMessage"
+    );
+    let Ok(directory) = std::env::var("CURSOR_BIDI_CAPTURE") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    if let Err(error) = std::fs::create_dir_all(&directory) {
+        tracing::warn!(directory = %directory.display(), error = %error, "cannot create Bidi capture directory");
+        return;
+    }
+    let stem = format!("{request_id}-{seqno}");
+    if let Err(error) = std::fs::write(directory.join(format!("{stem}.bin")), payload) {
+        tracing::warn!(error = %error, "cannot write Bidi capture payload");
+        return;
+    }
+    let metadata = serde_json::json!({
+        "request_id": request_id,
+        "append_seqno": seqno,
+        "source": source,
+        "payload_len": payload.len(),
+        "error": error.to_string(),
+    });
+    if let Err(error) = std::fs::write(
+        directory.join(format!("{stem}.json")),
+        serde_json::to_vec_pretty(&metadata).unwrap_or_default(),
+    ) {
+        tracing::warn!(error = %error, "cannot write Bidi capture metadata");
+    }
 }
 
 pub async fn append(
